@@ -1,0 +1,78 @@
+Panels:
+  - Class: rviz_common/Displays
+    Name: Displays
+Visualization Manager:
+  Global Options:
+    Fixed Frame: odom
+    Frame Rate: 15
+  Displays:
+    - Class: rviz_default_plugins/Grid
+      Name: Grid
+      Enabled: true
+      Plane Cell Count: 20
+      Cell Size: 0.5
+    - Class: rviz_default_plugins/TF
+      Name: TF
+      Enabled: true
+      Show Names: true
+    - Class: rviz_default_plugins/PointCloud2
+      Name: ODIN cloud_slam
+      Enabled: true
+      Topic:
+        Value: /odin1/cloud_slam
+        Depth: 5
+        Reliability Policy: Best Effort
+      Size (m): 0.02
+      Style: Points
+      Color Transformer: RGB8
+    - Class: rviz_default_plugins/Map
+      Name: Local Costmap
+      Enabled: true
+      Topic:
+        Value: /local_costmap/costmap
+        Depth: 1
+        Durability Policy: Transient Local
+        Reliability Policy: Reliable
+      Color Scheme: costmap
+      Alpha: 0.7
+    - Class: rviz_default_plugins/Polygon
+      Name: Robot Footprint
+      Enabled: true
+      Topic:
+        Value: /local_costmap/published_footprint
+        Reliability Policy: Best Effort
+      Color: 25; 255; 0
+    - Class: rviz_default_plugins/Pose
+      Name: Nav Goal (intent)
+      Enabled: true
+      Topic:
+        Value: /intent_goal_debug
+        Durability Policy: Transient Local
+        Reliability Policy: Reliable
+      Color: 255; 25; 0
+      Shape: Arrow
+    - Class: rviz_default_plugins/Path
+      Name: Received Plan
+      Enabled: true
+      Topic:
+        Value: /received_global_plan
+        Reliability Policy: Reliable
+      Color: 0; 170; 255
+    - Class: rviz_default_plugins/Path
+      Name: DWB Local Plan
+      Enabled: true
+      Topic:
+        Value: /local_plan
+        Reliability Policy: Reliable
+      Color: 255; 255; 0
+  Tools:
+    - Class: rviz_default_plugins/MoveCamera
+  Views:
+    Current:
+      Class: rviz_default_plugins/Orbit
+      Distance: 8
+      Pitch: 1.2
+      Focal Point:
+        X: 0
+        Y: 0
+        Z: 0

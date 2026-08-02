@@ -1,0 +1,272 @@
+# =====================================================================
+# Phase 7 Nav2 configuration — LOCAL-ONLY, differential drive.
+#
+# What this file DELIBERATELY does NOT contain (Phase 7 scope):
+#   - no planner_server / no global_costmap  (no map-based global planning)
+#   - no bt_navigator / behavior_server / smoother_server / amcl / map_server
+# We run ONLY:
+#   - controller_server   (DWB local planner + its embedded local_costmap)
+#   - velocity_smoother   (accel/jerk limiting between controller and drive_mux)
+#   - lifecycle_manager    (brings the two above to 'active')
+#
+# Design decision — moving-target goals (Phase 7 step 6):
+#   intent_to_goal_node is a FollowPath *action client*. It builds a straight
+#   line path (robot -> goal) in the odom frame and hands it to controller_server.
+#   DWB then does the actual obstacle-aware local avoidance around that line
+#   using the local_costmap. For a MOVING target it re-sends an updated path a
+#   few times a second; each new FollowPath goal natively PREEMPTS the previous
+#   one (no cancel/resend churn). See intent_to_goal_node.py for the rationale.
+#   This is why there is no planner_server: the "global plan" is a trivial
+#   straight line we generate ourselves, which is all a local-only, no-map
+#   follow/flee behaviour needs.
+#
+# Frame chain (confirmed live, Phase 7 step 1):
+#   odom --(dynamic, /odin1/odometry ~10Hz)--> odin1_base_link
+#   We use odom as the costmap global_frame and odin1_base_link as the robot
+#   base frame directly — no new TF was required. odin1_base_link sits at the
+#   ODIN sensor (above ground, slight fixed tilt); acceptable for a local
+#   obstacle costmap. See final summary for the base_footprint refinement note.
+# =====================================================================
+
+controller_server:
+  ros__parameters:
+    # Lowered from the Nav2 default 20Hz: this is a Jetson/Tegra sharing CPU
+    # with two ArUco trackers. 15Hz control is plenty for a ~0.5 m/s robot and
+    # leaves headroom. TUNABLE — raise if CPU allows and tracking feels laggy.
+    controller_frequency: 15.0
+
+    # Below these the reported odom velocity is treated as zero (noise gate).
+    min_x_velocity_threshold: 0.02
+    min_y_velocity_threshold: 0.5      # diff drive: no lateral motion ever
+    min_theta_velocity_threshold: 0.05
+
+    failure_tolerance: 0.3
+    progress_checker_plugin: "progress_checker"
+    goal_checker_plugins: ["goal_checker"]
+    controller_plugins: ["FollowPath"]
+
+    # Publish Twist (unstamped) so it matches serial_driver / drive_mux, which
+    # are all plain geometry_msgs/Twist. Jazzy can default to TwistStamped.
+    enable_stamped_cmd_vel: false
+
+    progress_checker:
+      plugin: "nav2_controller::SimpleProgressChecker"
+      required_movement_radius: 0.3
+      # Generous: a slow robot behind a temporary obstacle shouldn't trip the
+      # "stuck" failure too eagerly.
+      movement_time_allowance: 12.0
+
+    goal_checker:
+      plugin: "nav2_controller::SimpleGoalChecker"
+      # For 'follow' this is how close to the standoff point counts as arrived
+      # (robot then holds until the target moves again). Loose on purpose so we
+      # don't hunt around the standoff point.
+      xy_goal_tolerance: 0.20
+      yaw_goal_tolerance: 0.30
+      stateful: true
+
+    # ---- DWB local planner (differential drive) --------------------------
+    # DWB (not RPP) chosen because RPP does NOT actively route around obstacles
+    # (it only follows + collision-stops); MPPI would avoid but is markedly more
+    # CPU-hungry on this Tegra. DWB's critic-based trajectory scoring gives real
+    # local obstacle avoidance at acceptable cost — the Phase 7 requirement.
+    FollowPath:
+      plugin: "dwb_core::DWBLocalPlanner"
+
+      # --- velocity / accel limits ---
+      # NOTE (stiction floor, serial_driver): the motors move at ~0.667 m/s
+      # WHEEL speed or not at all (min_effective_speed=10 on a speed_scale=0.15
+      # => post-scale band [10..15] of [-15..15]). Any nonzero command below
+      # that is boosted UP to the floor. Consequences that were flagged to the
+      # operator:
+      #   * There is little usable fine speed control; the velocity smoother's
+      #     gentle-start ramp is largely defeated for linear.x (serial jumps
+      #     0 -> floor the instant the command goes nonzero). The smoother still
+      #     helps angular jerk, direction-reversal, and decel.
+      #   * max_vel_x is set near the real floor so DWB's motion model roughly
+      #     matches physical reality instead of planning for speeds the robot
+      #     can't hold. TUNABLE together with serial_driver's speed_scale.
+      min_vel_x: 0.0
+      max_vel_x: 0.45        # ~ the real ~0.45-0.67 m/s band, see note above
+      min_vel_y: 0.0
+      max_vel_y: 0.0         # differential drive: zero lateral
+      max_vel_theta: 1.0     # matches old target_pid MAX_ANGULAR_Z
+      min_speed_xy: 0.0
+      max_speed_xy: 0.45
+      min_speed_theta: 0.0
+
+      acc_lim_x: 1.5
+      acc_lim_y: 0.0
+      acc_lim_theta: 3.2
+      decel_lim_x: -1.5
+      decel_lim_y: 0.0
+      decel_lim_theta: -3.2
+
+      vx_samples: 20
+      vy_samples: 0          # diff drive
+      vtheta_samples: 40
+      sim_time: 1.5
+      linear_granularity: 0.05
+      angular_granularity: 0.025
+      transform_tolerance: 0.5
+      xy_goal_tolerance: 0.20
+      trans_stopped_velocity: 0.10   # >0 because of the floor: never expect <0.1
+      short_circuit_trajectory_evaluation: true
+      stateful: true
+
+      critics: ["RotateToGoal", "Oscillation", "BaseObstacle", "GoalAlign",
+                "PathAlign", "PathDist", "GoalDist"]
+      BaseObstacle.scale: 0.02
+      PathAlign.scale: 32.0
+      PathAlign.forward_point_distance: 0.325
+      GoalAlign.scale: 24.0
+      GoalAlign.forward_point_distance: 0.325
+      PathDist.scale: 32.0
+      GoalDist.scale: 24.0
+      RotateToGoal.scale: 32.0
+      RotateToGoal.slowing_factor: 5.0
+      RotateToGoal.lookahead_time: -1.0
+      Oscillation.scale: 1.0
+
+# =====================================================================
+# LOCAL COSTMAP (embedded in controller_server; no global costmap exists).
+# Source: /odin1/cloud_slam  (odom frame, gravity-aligned, SLAM-filtered).
+# Rationale (Phase 7 step 2): being already in odom means the floor is a
+# constant-Z plane, so min/max_obstacle_height cleanly rejects it — the raw
+# sensor cloud is tilted and would smear the floor into false walls.
+# =====================================================================
+local_costmap:
+  local_costmap:
+    ros__parameters:
+      update_frequency: 5.0        # matches cloud_slam ~5Hz; no point going faster
+      publish_frequency: 3.0
+      global_frame: odom
+      robot_base_frame: odin1_base_link
+      rolling_window: true
+      # 4m x 4m window @ 5cm — big enough to see and route around an obstacle
+      # a couple metres ahead for a slow indoor/short-range robot, small enough
+      # to stay cheap on CPU. TUNABLE (width/height/resolution).
+      width: 4
+      height: 4
+      resolution: 0.05
+      # Robot footprint: modelled as a circle. TRACK_WIDTH=0.2286m; radius picked
+      # a little larger than half-track to include body overhang + safety. TUNABLE.
+      robot_radius: 0.18
+      transform_tolerance: 0.5
+      plugins: ["obstacle_layer", "inflation_layer"]
+
+      obstacle_layer:
+        plugin: "nav2_costmap_2d::ObstacleLayer"
+        enabled: true
+        observation_sources: odin_cloud
+        odin_cloud:
+          topic: /odin1/cloud_slam
+          data_type: "PointCloud2"
+          # sensor_frame REQUIRED here (2026-07-25 fix, found empty costmap
+          # in a hallway far from odom's origin): cloud_slam's own frame_id
+          # is "odom" (the global frame itself, deliberately -- see height
+          # filtering note below), and nav2_costmap_2d's ObservationBuffer
+          # falls back to the CLOUD MESSAGE's OWN frame_id to resolve the
+          # sensor's origin for range-checking/raytracing whenever
+          # sensor_frame is left empty. Since frame_id == global_frame, that
+          # origin resolves to a FIXED (0,0,0) instead of the robot's real,
+          # moving position -- fine right at the odom origin (where earlier
+          # bench tests happened to be), but once the robot has driven
+          # meters away, every point's "distance from sensor" is computed
+          # from (0,0,0) instead of the robot's real position, silently
+          # blowing past obstacle_max_range/raytrace_max_range and rejecting
+          # EVERY point -- an entirely empty costmap despite valid,
+          # in-range, correctly height-filtered data. Explicitly pointing
+          # sensor_frame at the live, TF-tracked robot_base_frame fixes the
+          # origin lookup (global_frame "odom" -> sensor_frame via TF)
+          # WITHOUT touching the points themselves, which must stay in the
+          # odom frame for the height-filter trick below to keep working.
+          sensor_frame: odin1_base_link
+          # Heights are in the odom (global) frame == metres above the SLAM
+          # world origin, which is gravity-aligned. These reject the floor and
+          # the ceiling. TUNABLE — the exact numbers depend on where odom's z=0
+          # ended up relative to the real floor; validated in rviz (test 8a).
+          min_obstacle_height: 0.10
+          max_obstacle_height: 1.50
+          clearing: true
+          marking: true
+          obstacle_max_range: 3.0    # don't mark beyond the useful window
+          obstacle_min_range: 0.0
+          raytrace_max_range: 3.5    # clear slightly beyond marking range
+          raytrace_min_range: 0.0
+          inf_is_valid: false
+
+      inflation_layer:
+        plugin: "nav2_costmap_2d::InflationLayer"
+        enabled: true
+        # Live-tuned 2026-07-14 while eyeballing the costmap viewer: the
+        # original (0.35, 3.0) pairing made every gap between obstacles read
+        # as solid orange/yellow even when there was clearly enough room to
+        # drive through (a real, genuinely tight-looking rendering, not just
+        # a visualization bug — see costmap_to_image_node's color-ramp fix
+        # from the same session for the OTHER half of that issue). Tightening
+        # radius + steepening the falloff shrinks the halo around obstacles
+        # while still keeping real margin beyond robot_radius (0.18m).
+        # Verified live: inflated cell count dropped ~52% (898->428) on the
+        # same scene. TUNABLE — re-widen if the robot cuts corners too close.
+        cost_scaling_factor: 6.0
+        inflation_radius: 0.25
+
+      always_send_full_costmap: true
+
+# =====================================================================
+# VELOCITY SMOOTHER (Phase 7 step 5).
+# Sits between controller_server output (/nav2/cmd_vel_raw) and drive_mux
+# (/nav2/cmd_vel_smoothed). Limits accel/jerk so the powerful drive motors
+# don't lurch. NOTE: partly defeated on linear.x by serial_driver's stiction
+# floor (see controller_server note) — still valuable for angular smoothing,
+# decel, and blocking rapid direction reversals.
+# Manual mode is NOT routed through here (raw controller feel is intentional in
+# Phase 7). TODO(Phase 8 web UI): expose a per-mode "smooth manual too" toggle.
+# =====================================================================
+velocity_smoother:
+  ros__parameters:
+    smoothing_frequency: 20.0
+    scale_velocities: false
+    feedback: "OPEN_LOOP"
+    enable_stamped_cmd_vel: false
+    max_velocity: [0.45, 0.0, 1.0]      # [x, y, theta] — mirror DWB limits
+    min_velocity: [-0.45, 0.0, -1.0]
+    max_accel: [1.5, 0.0, 3.2]
+    max_decel: [-1.5, 0.0, -3.2]
+    odom_topic: "/odin1/odometry"
+    odom_duration: 0.1
+    deadband_velocity: [0.0, 0.0, 0.0]
+    velocity_timeout: 1.0
+
+# =====================================================================
+# COLLISION MONITOR — tried in Phase 7.1, REMOVED same session (2026-07-14).
+#
+# It sat as the last stage before /cmd_vel, downstream of drive_mux, meant to
+# give MANUAL/SEMI joystick driving stop/slowdown protection even with no
+# marker/goal ('auto' already had avoidance via DWB+local costmap and is
+# unaffected by this removal). Removed because ODIN's point cloud timestamps
+# run on the sensor's own hardware clock, tens of minutes offset from ROS
+# system time — collision_monitor's source-staleness check compares message
+# stamps directly against node now(), so it permanently distrusted live data
+# and silently withheld ALL /cmd_vel output. Not a tuning problem: any
+# timeout small enough to be a real safety net was also small enough to
+# reject genuinely-fresh data. User's explicit call: remove it rather than
+# loosen the timeout past the point it means anything — the PS-button e-stop
+# and a physical kill switch are the real safety net and don't depend on any
+# of this. See drive_mux_node.py CMD_VEL_OUT_TOPIC comment.
+#
+# If revisited later, the real fix is at the ODIN driver level (get it
+# stamping messages with ROS/system time), not a bigger timeout here.
+# =====================================================================
+
+# =====================================================================
+# Lifecycle manager for the Nav2 nodes we actually run.
+# =====================================================================
+lifecycle_manager_navigation:
+  ros__parameters:
+    autostart: true
+    node_names:
+      - controller_server
+      - velocity_smoother
+    bond_timeout: 8.0        # a little generous for a loaded Tegra
