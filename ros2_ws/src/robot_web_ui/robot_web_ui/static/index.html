@@ -1,0 +1,364 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Robot Control</title>
+<meta name="viewport" content="width=1920, height=1080, initial-scale=1">
+<style>
+  :root {
+    --red: #E11D2E;
+    --gray: #5a5a5a;
+    --border: #d5d5d5;
+    --border2: #e0e0e0;
+    --ok: #2e9e4f;
+    --warn: #c98a12;
+    --down: #E11D2E;
+  }
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0; padding: 0; width: 100vw; height: 100vh;
+    overflow: hidden; background: #ffffff; color: #1a1a1a;
+    font-family: -apple-system, "Segoe UI", Roboto, Arial, sans-serif;
+    font-size: 11px;
+  }
+  #app { display: flex; flex-direction: column; width: 100vw; height: 100vh; }
+
+  /* ---------- Top bar ---------- */
+  #topbar {
+    display: flex; align-items: center; justify-content: space-between;
+    height: 36px; min-height: 36px; padding: 0 14px;
+    border-bottom: 1px solid var(--border);
+  }
+  #topbar .title { font-size: 15px; font-weight: 700; letter-spacing: 0.02em; }
+  #topbar .status-group { display: flex; align-items: center; gap: 18px; }
+  .status-item { display: flex; align-items: center; gap: 6px; color: var(--gray); }
+  .dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; background: var(--gray); }
+  .dot.ok { background: var(--ok); }
+  .dot.warn { background: var(--warn); }
+  .dot.down { background: var(--down); }
+  #settings-btn {
+    background: none; border: 1px solid var(--border2); border-radius: 4px;
+    color: var(--gray); font-size: 15px; line-height: 1; padding: 3px 8px; cursor: pointer;
+  }
+  #settings-btn:hover { border-color: var(--red); color: var(--red); }
+
+  /* ---------- Settings modal ---------- */
+  #settings-overlay {
+    display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.35);
+    align-items: center; justify-content: center; z-index: 50;
+  }
+  #settings-overlay.open { display: flex; }
+  #settings-panel {
+    background: #fff; border: 1px solid var(--border); border-radius: 6px;
+    width: 420px; max-width: 90vw; padding: 16px 18px;
+  }
+  .settings-header {
+    display: flex; justify-content: space-between; align-items: center;
+    font-size: 14px; font-weight: 700; margin-bottom: 8px;
+  }
+  .settings-header button {
+    background: none; border: none; font-size: 20px; line-height: 1; cursor: pointer; color: var(--gray);
+  }
+  .min-speed-label {
+    width: 30px; flex-shrink: 0; color: var(--gray); font-weight: 700;
+  }
+  .settings-action-btn {
+    width: 100%; padding: 8px 4px; background: #fff; color: var(--red);
+    border: 1.5px solid var(--red); border-radius: 4px; font-size: 12px;
+    font-weight: 700; cursor: pointer;
+  }
+  .settings-action-btn:active { background: var(--red); color: #fff; }
+
+  /* ---------- Toggle switch ---------- */
+  .toggle-row {
+    display: flex; align-items: center; gap: 8px; height: 24px; flex-shrink: 0; color: var(--gray);
+  }
+  .switch { position: relative; display: inline-block; width: 34px; height: 18px; flex-shrink: 0; }
+  .switch input { opacity: 0; width: 0; height: 0; }
+  .switch-slider {
+    position: absolute; cursor: pointer; inset: 0; background: var(--border2);
+    border-radius: 18px; transition: background 120ms;
+  }
+  .switch-slider::before {
+    content: ""; position: absolute; height: 14px; width: 14px; left: 2px; bottom: 2px;
+    background: #fff; border-radius: 50%; transition: transform 120ms;
+  }
+  .switch input:checked + .switch-slider { background: var(--red); }
+  .switch input:checked + .switch-slider::before { transform: translateX(16px); }
+
+  /* ---------- Main grid ---------- */
+  #main {
+    flex: 1; min-height: 0; display: grid;
+    grid-template-columns: 1.7fr 0.85fr 0.85fr 1.15fr;
+    gap: 10px; padding: 10px;
+  }
+  .col { min-width: 0; min-height: 0; display: flex; flex-direction: column; gap: 8px; }
+
+  /* ---------- Cameras (col 1) ---------- */
+  .camera-panel {
+    flex: 1; min-height: 0; position: relative; background: #111;
+    border: 1px solid var(--border); border-radius: 4px; overflow: hidden;
+  }
+  .camera-panel img.feed {
+    width: 100%; height: 100%; object-fit: contain; display: block; background: #111;
+  }
+  .camera-panel canvas {
+    width: 100%; height: 100%; display: block; background: #111;
+  }
+  .camera-label {
+    position: absolute; top: 6px; left: 8px; color: #fff; font-size: 11px;
+    font-weight: 600; text-shadow: 0 1px 2px rgba(0,0,0,0.8); letter-spacing: 0.03em;
+    pointer-events: none; z-index: 3;
+  }
+  .overlay-layer { position: absolute; inset: 0; pointer-events: none; }
+  .deadzone-band {
+    position: absolute; top: 0; bottom: 0; background: rgba(225,29,46,0.06);
+    border-left: 1px dashed rgba(225,29,46,0.45); border-right: 1px dashed rgba(225,29,46,0.45);
+  }
+  .bbox-rect {
+    position: absolute; border: 2px solid var(--red); background: rgba(225,29,46,0.05);
+  }
+  .bbox-label {
+    position: absolute; bottom: 100%; left: 0; background: var(--red); color: #fff;
+    font-size: 10px; padding: 1px 4px; white-space: nowrap; font-weight: 600;
+  }
+
+  /* ---------- Column 2: drive controls ---------- */
+  #estop-btn {
+    background: var(--red); color: #fff; border: none; border-radius: 4px;
+    font-size: 22px; font-weight: 800; letter-spacing: 0.05em;
+    height: 90px; cursor: pointer; flex-shrink: 0;
+  }
+  #estop-btn:active { filter: brightness(0.85); }
+  .section-label {
+    color: var(--gray); font-size: 11px; font-weight: 600; margin-top: 2px;
+    text-transform: uppercase; letter-spacing: 0.04em;
+  }
+  .btn-row { display: flex; gap: 6px; }
+  .btn-row button {
+    flex: 1; padding: 8px 4px; background: #fff; color: var(--gray);
+    border: 1px solid var(--border2); border-radius: 4px; font-size: 12px;
+    font-weight: 600; cursor: pointer;
+  }
+  .btn-row button.active {
+    border: 1.5px solid var(--red); color: var(--red);
+  }
+  .speed-widget {
+    display: flex; align-items: center; gap: 10px; height: 30px; flex-shrink: 0;
+    border: 1px solid var(--border2); border-radius: 4px; padding: 0 10px;
+  }
+  .speed-widget input[type="range"] {
+    flex: 1; accent-color: var(--red);
+  }
+  .speed-widget .speed-value {
+    font-weight: 700; font-size: 12px; width: 34px; text-align: right; flex-shrink: 0;
+  }
+  .door-widget {
+    display: flex; align-items: center; gap: 10px; height: 46px; flex-shrink: 0;
+    border: 1px solid var(--border2); border-radius: 4px; padding: 0 10px;
+  }
+  .door-widget svg { width: 30px; height: 30px; flex-shrink: 0; }
+  .door-text { display: flex; flex-direction: column; line-height: 1.35; }
+  .door-text .angle { font-weight: 700; font-size: 12px; }
+  .door-text .status { color: var(--gray); }
+
+  /* ---------- Column 3: deck schematic ---------- */
+  .deck-panel {
+    flex: 1; min-height: 0; display: flex; align-items: center; justify-content: center;
+    border: 1px solid var(--border); border-radius: 4px; padding: 4px;
+  }
+  .deck-panel svg { width: 100%; height: 100%; max-height: 100%; }
+  .deck-part { fill: #f2f2f2; stroke: #b9b9b9; stroke-width: 1.5; transition: fill 60ms, stroke 60ms; }
+  .deck-part.active { fill: var(--red); stroke: var(--red); }
+  .deck-label { font-size: 7px; fill: var(--gray); text-anchor: middle; pointer-events: none; }
+
+  .stick-widget {
+    height: 92px; flex-shrink: 0; border: 1px solid var(--border2); border-radius: 4px;
+    display: flex; align-items: center; gap: 10px; padding: 8px 12px;
+  }
+  .stick-box {
+    width: 70px; height: 70px; border: 1px solid var(--border2); border-radius: 4px;
+    position: relative; background: #fafafa; flex-shrink: 0;
+  }
+  .stick-dot {
+    width: 8px; height: 8px; border-radius: 50%; background: var(--red);
+    position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
+  }
+  .stick-readout { color: var(--gray); line-height: 1.6; }
+  .stick-readout b { color: #1a1a1a; }
+
+  /* ---------- Column 4: node grid + log ---------- */
+  .node-grid-panel {
+    flex: 1.3; min-height: 0; border: 1px solid var(--border); border-radius: 4px;
+    padding: 8px; overflow-y: auto;
+  }
+  .node-grid {
+    display: grid; grid-template-columns: 1fr 1fr; gap: 4px 10px;
+  }
+  .node-row { display: flex; align-items: center; gap: 6px; padding: 2px 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .log-panel {
+    flex: 1; min-height: 0; border: 1px solid var(--border); border-radius: 4px;
+    padding: 8px; overflow-y: auto; font-family: "SFMono-Regular", Consolas, Menlo, monospace;
+    background: #fbfbfb;
+  }
+  .log-line { color: var(--gray); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .log-line .t { color: #999; margin-right: 6px; }
+  .panel-title {
+    color: var(--gray); font-size: 10px; font-weight: 700; text-transform: uppercase;
+    letter-spacing: 0.05em; margin-bottom: 4px;
+  }
+</style>
+</head>
+<body>
+<div id="app">
+  <div id="topbar">
+    <div class="title">ROBOT CONTROL</div>
+    <div class="status-group">
+      <div class="status-item"><span class="dot" id="health-dot"></span><span id="health-text">-- / -- nodes ok</span></div>
+      <div class="status-item"><span class="dot" id="conn-dot"></span><span id="conn-text">connecting…</span></div>
+      <button id="settings-btn" title="Settings">&#9881;</button>
+    </div>
+  </div>
+
+  <div id="main">
+    <!-- Column 1: cameras -->
+    <div class="col">
+      <div class="camera-panel" id="cam-front">
+        <div class="camera-label">FRONT / ODIN</div>
+        <img class="feed" src="/video/front">
+        <div class="overlay-layer" id="overlay-front"></div>
+      </div>
+      <div class="camera-panel" id="cam-rear">
+        <div class="camera-label">REAR</div>
+        <img class="feed" src="/video/rear">
+        <div class="overlay-layer" id="overlay-rear"></div>
+      </div>
+    </div>
+
+    <!-- Column 2: drive controls -->
+    <div class="col">
+      <button id="estop-btn">E-STOP</button>
+      <div class="section-label">Drive source</div>
+      <div class="btn-row" id="drive-source-row">
+        <button data-value="manual">MANUAL</button>
+        <button data-value="semi">SEMI</button>
+        <button data-value="auto">AUTO</button>
+      </div>
+      <div class="section-label">Track mode</div>
+      <div class="btn-row" id="track-mode-row">
+        <button data-value="follow">FOLLOW</button>
+        <button data-value="flee">FLEE</button>
+      </div>
+      <div class="toggle-row">
+        <label class="switch"><input type="checkbox" id="auto-enable-toggle"><span class="switch-slider"></span></label>
+        <span>Auto drive (no trigger held) — auto/semi only</span>
+      </div>
+      <div class="door-widget">
+        <svg viewBox="0 0 40 40" id="door-svg">
+          <line x1="8" y1="6" x2="8" y2="34" stroke="#5a5a5a" stroke-width="2"/>
+          <g id="door-swing" style="transform-origin: 8px 6px;">
+            <line x1="8" y1="6" x2="8" y2="30" stroke="#E11D2E" stroke-width="2"/>
+          </g>
+          <path d="M 8 6 A 24 24 0 0 1 30 20" fill="none" stroke="#d5d5d5" stroke-width="1" stroke-dasharray="2 2"/>
+        </svg>
+        <div class="door-text">
+          <span class="angle" id="door-angle">-- deg</span>
+          <span class="status" id="door-status">unknown</span>
+        </div>
+        <div class="btn-row" style="margin-left:auto; width:110px;">
+          <button data-door="open">OPEN</button>
+          <button data-door="close">CLOSE</button>
+        </div>
+      </div>
+      <div class="camera-panel" id="cam-costmap" style="flex:1;">
+        <div class="camera-label">LOCAL COSTMAP</div>
+        <img class="feed" src="/video/costmap">
+      </div>
+    </div>
+
+    <!-- Column 3: Steam Deck schematic -->
+    <div class="col">
+      <div class="deck-panel"><svg id="deck-svg" viewBox="0 0 400 260"></svg></div>
+      <div class="stick-widget">
+        <div class="stick-box"><div class="stick-dot" id="stick-dot"></div></div>
+        <div class="stick-readout">
+          x: <b id="stick-x">0.00</b><br>
+          y: <b id="stick-y">0.00</b>
+        </div>
+      </div>
+      <div class="camera-panel" id="cloud-panel" style="flex:1;">
+        <div class="camera-label">POINT CLOUD (odin1_base_link)</div>
+        <canvas id="cloud-canvas"></canvas>
+      </div>
+    </div>
+
+    <!-- Column 4: node grid + log -->
+    <div class="col">
+      <div class="node-grid-panel">
+        <div class="panel-title">ROS 2 nodes</div>
+        <div class="node-grid" id="node-grid"></div>
+      </div>
+      <div class="log-panel">
+        <div class="panel-title">Event log</div>
+        <div id="log-lines"></div>
+      </div>
+    </div>
+  </div>
+
+  <div id="settings-overlay">
+    <div id="settings-panel">
+      <div class="settings-header">
+        <span>SETTINGS</span>
+        <button id="settings-close">&times;</button>
+      </div>
+
+      <div class="section-label">Max speed (serial_driver speed_scale, caps all modes)</div>
+      <div class="speed-widget">
+        <input type="range" id="speed-slider" min="0" max="100" step="5" value="15">
+        <span class="speed-value" id="speed-value">15%</span>
+      </div>
+
+      <div class="section-label">Left wheel min speed (0-100, byte scale)</div>
+      <div class="speed-widget">
+        <span class="min-speed-label">FWD</span>
+        <input type="range" class="min-speed-slider" data-param="left_min_forward_speed" min="0" max="100" step="1" value="14">
+        <span class="speed-value" data-readout="left_min_forward_speed">14</span>
+      </div>
+      <div class="speed-widget">
+        <span class="min-speed-label">REV</span>
+        <input type="range" class="min-speed-slider" data-param="left_min_reverse_speed" min="0" max="100" step="1" value="14">
+        <span class="speed-value" data-readout="left_min_reverse_speed">14</span>
+      </div>
+
+      <div class="section-label">Right wheel min speed (0-100, byte scale)</div>
+      <div class="speed-widget">
+        <span class="min-speed-label">FWD</span>
+        <input type="range" class="min-speed-slider" data-param="right_min_forward_speed" min="0" max="100" step="1" value="10">
+        <span class="speed-value" data-readout="right_min_forward_speed">10</span>
+      </div>
+      <div class="speed-widget">
+        <span class="min-speed-label">REV</span>
+        <input type="range" class="min-speed-slider" data-param="right_min_reverse_speed" min="0" max="100" step="1" value="10">
+        <span class="speed-value" data-readout="right_min_reverse_speed">10</span>
+      </div>
+
+      <div class="section-label">Camera steering (debug)</div>
+      <div class="toggle-row">
+        <label class="switch"><input type="checkbox" id="front-invert-toggle"><span class="switch-slider"></span></label>
+        <span>Invert front camera turn direction (follow)</span>
+      </div>
+      <div class="toggle-row">
+        <label class="switch"><input type="checkbox" id="rear-invert-toggle"><span class="switch-slider"></span></label>
+        <span>Invert rear camera turn direction (flee)</span>
+      </div>
+
+      <div class="section-label">Nav2</div>
+      <button id="reset-costmap-btn" class="settings-action-btn">RESET COSTMAP</button>
+    </div>
+  </div>
+</div>
+
+<script src="/static/deck_schematic.js"></script>
+<script src="/static/app.js"></script>
+</body>
+</html>
