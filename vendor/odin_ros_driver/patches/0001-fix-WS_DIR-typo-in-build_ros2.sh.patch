@@ -1,0 +1,13 @@
+diff --git a/script/build_ros2.sh b/script/build_ros2.sh
+index fee138d..8827fb8 100755
+--- a/script/build_ros2.sh
++++ b/script/build_ros2.sh
+@@ -65,7 +65,7 @@ build_workspace() {
+     
+     echo -e "${YELLOW}Starting ROS2 project build...${NC}"
+ 
+-    cd $WS_DIR
++    cd "$WORKSPACE_ROOT"
+     rm -rf build install log
+     # Ensure ROS2 environment is loaded.
+     # 1) Prefer the currently active distro (ROS_DISTRO env var) if its setup.bash exists.

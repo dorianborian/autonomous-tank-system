@@ -1,0 +1,3 @@
+hash: 388440c977af579ea81c3c242ab36fb958d3be82
+date: 2026-06-18 19:56:53 +0800
+subject: 0.12.0 release
