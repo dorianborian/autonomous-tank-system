@@ -1,0 +1,30 @@
+# ROS 2 / colcon build artifacts (every workspace under ros2_ws/)
+build/
+install/
+log/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+
+# Model weights and exported inference engines -- NOT portable across
+# TensorRT/CUDA versions and must be regenerated per-machine. See
+# README.md "Regenerating the TensorRT engine".
+*.engine
+*.pt
+*.onnx
+
+# Editor / OS junk
+.vscode/
+.idea/
+*.swp
+.DS_Store
+
+# ROS logging / rosbag
+*.db3
+*.bag
+
+# Local machine-specific overrides, if anyone adds one
+*.local.yaml
+*.local.env
