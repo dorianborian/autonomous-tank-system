@@ -1,0 +1,21 @@
+[Unit]
+Description=Robot full behavior stack (Nav2, YOLO trackers, web control UI)
+After=robot-odin.service multi-user.target
+Wants=robot-odin.service robot-serial.service robot-rear-cam.service
+StartLimitIntervalSec=60
+StartLimitBurst=5
+
+[Service]
+Type=simple
+User=YOUR_USERNAME
+Environment=HOME=/home/YOUR_USERNAME
+ExecStart=/home/YOUR_USERNAME/autonomous-tank-system/deploy/scripts/start_full_behavior.sh
+Restart=on-failure
+RestartSec=5
+# The two YOLO/TensorRT trackers inside this launch have been observed to
+# take several minutes on a cold cache on this hardware (2026-07-24) --
+# give the unit real time before systemd gives up on the start.
+TimeoutStartSec=600
+
+[Install]
+WantedBy=multi-user.target

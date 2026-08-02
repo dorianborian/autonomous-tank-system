@@ -1,0 +1,17 @@
+[Unit]
+Description=Robot ODIN camera/SLAM driver
+After=multi-user.target network-online.target
+Wants=network-online.target
+StartLimitIntervalSec=60
+StartLimitBurst=5
+
+[Service]
+Type=simple
+User=YOUR_USERNAME
+Environment=HOME=/home/YOUR_USERNAME
+ExecStart=/home/YOUR_USERNAME/autonomous-tank-system/deploy/scripts/start_odin.sh
+Restart=on-failure
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target

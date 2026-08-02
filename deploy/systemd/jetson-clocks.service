@@ -1,0 +1,12 @@
+[Unit]
+Description=Lock Jetson CPU/GPU/EMC clocks to max (jetson_clocks)
+After=nvpmodel.service
+Wants=nvpmodel.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/jetson_clocks
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target
