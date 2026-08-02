@@ -1,5 +1,10 @@
-# Autonomous Tank System
-
+<p align="center">
+  <img
+    src="https://github.com/user-attachments/assets/fe66b835-f37d-494d-a863-cc87c8635cee"
+    alt="fridge-tank-github-titlecard"
+    width="70%"
+  />
+</p>
 An autonomous robot built around a Frigidaire retro mini fridge on a
 tank-tread chassis. It follows or flees from a detected person, avoids
 obstacles, and is controlled from a Steam Deck via a browser-based web UI
